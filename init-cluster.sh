@@ -23,6 +23,13 @@ echo "Launching master node..."
 ## 예시 2: etcd + flannel 제거 + Calico를 직접 설치할 준비
 ### curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init --flannel-backend=none --disable-network-policy" sh -
 ### curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init --disable=traefik" sh -
+if [ -z INSTALL_K3S_EXEC ];then
+  INSTALL_K3S_EXEC="--cluster-init"
+else
+  INSTALL_K3S_EXEC="--cluster-init ${INSTALL_K3S_EXEC}"
+fi
+
+echo "INSTALL_K3S_EXEC is ${INSTALL_K3S_EXEC}"
 
 cat > master.yaml <<EOF
 package_update: true
@@ -30,7 +37,7 @@ image: ${IMAGE}
 packages:
   - curl
 runcmd:
-  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init" sh -
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC}" sh -
   - mkdir -p /etc/k3s
 EOF
 
