@@ -4,3 +4,5 @@
 ├── add-worker.sh       : k8s cluster에 worker 추가 
 └── create-cluster.sh   : Multipass k3s cluster 생성 
 ```
+
+## 파일 상세
