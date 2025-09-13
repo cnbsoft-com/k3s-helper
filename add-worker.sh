@@ -28,8 +28,8 @@ IMAGE=ubuntu-$(multipass ls | grep ^${CONTEXT_NAME}-master | awk '{print $5}')
 NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
 MASTER_IP=$(multipass exec ${CONTEXT_NAME}-master -- hostname -I | awk '{print $1}')
 NODE_TOKEN=$(multipass exec ${CONTEXT_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
-START_COUNT = $(( $CURRENT_SIZE + 1 ))
-END_COUNT = $(( $WORKER_SIZE + $CURRENT_SIZE))
+START_COUNT=$(( $CURRENT_SIZE + 1 ))
+END_COUNT=$(( $WORKER_SIZE + $CURRENT_SIZE))
 
 for i in $(seq $START_COUNT $END_COUNT); do
   cat > worker-${i}.yaml <<EOF
