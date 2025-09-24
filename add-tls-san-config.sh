@@ -37,7 +37,9 @@ EOF
 applyTlsSanConfig(){
   cat $temp_file_name | multipass exec ${cluster_name}-master -- sudo tee /etc/rancher/k3s/config.yaml
   rm -rf $temp_file_name
+  echo "restarting k3s service..."
   multipass exec ${cluster_name}-master -- sudo systemctl restart k3s
+  echo "finished job"
 }
 
 
@@ -48,7 +50,6 @@ confirmTypeInfo
 if [[ -z $isApply || "Y" == $isApply ]]; then
   writeTempTlsSanConfig
   applyTlsSanConfig
-else
-  exit 0
 fi
+exit 0
 
