@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 if [ -z $1 ]; then
     echo "Set context name USAGE: context_name[ex:] worker_size[default: 2]"
