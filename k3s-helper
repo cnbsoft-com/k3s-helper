@@ -1,0 +1,366 @@
+#!/bin/bash
+set -e
+
+# Default Configuration & Environment Overrides
+DEFAULT_WORKERS=${WORKER_SIZE:-2}
+DEFAULT_MASTER_CPU=${MASTER_CPU:-2}
+DEFAULT_MASTER_MEM=${MASTER_MEM:-"2G"}
+DEFAULT_MASTER_DISK=${MASTER_DISK:-"10G"}
+
+DEFAULT_WORKER_CPU=${WORKER_CPU:-2}
+DEFAULT_WORKER_MEM=${WORKER_MEM:-"2G"}
+DEFAULT_WORKER_DISK=${WORKER_DISK:-"10G"}
+
+DEFAULT_IMAGE_TAG="24.04"
+
+# Helper Functions
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [COMMAND] [OPTIONS]
+
+Commands:
+  create       Create a new k3s cluster (Interactive if args missing)
+  add-worker   Add worker nodes to an existing cluster
+  tls-san      Add TLS SAN config to master node
+  vm           Manage generic Multipass VMs
+
+Run '$(basename "$0") [COMMAND] --help' for more information on a command.
+EOF
+    exit 1
+}
+
+# --- Image Selection Logic ---
+find_multipass_image() {
+  command multipass find 2>/dev/null | awk 'NR>1 {print $1}' | grep -E '^[0-9]{2}\.[0-9]{2}$' | sort -u
+}
+
+select_multipass_image() {
+    # 1. Preset by argument or env
+    if [ -n "$SELECTED_IMAGE" ]; then
+        echo "Using image: $SELECTED_IMAGE"
+        return 0
+    fi
+    if [ -n "$MULTIPASS_IMAGE" ]; then
+        SELECTED_IMAGE="$MULTIPASS_IMAGE"
+        echo "Using image from env: $SELECTED_IMAGE"
+        return 0
+    fi
+
+    # 2. If not interactive, use default
+    if [ "$INTERACTIVE" != true ]; then
+        SELECTED_IMAGE="$DEFAULT_IMAGE_TAG"
+        echo "Using default image: $SELECTED_IMAGE"
+        return 0
+    fi
+
+    # 3. Interactive Selection
+    echo "Scanning available Multipass images..."
+    IMAGES=$(find_multipass_image)
+
+    if [ -z "$IMAGES" ]; then
+        echo "Could not find images. Defaulting to $DEFAULT_IMAGE_TAG"
+        SELECTED_IMAGE="$DEFAULT_IMAGE_TAG"
+        return 0
+    fi
+
+    echo ""
+    echo "Available Images:"
+    echo "$IMAGES" | nl -w2 -s'. '
+    echo "  c. Custom input"
+    echo "  Enter. Default ($DEFAULT_IMAGE_TAG)"
+
+    while :; do
+        read -p "Select image number (Default: $DEFAULT_IMAGE_TAG): " ans
+        case "$ans" in
+            "") SELECTED_IMAGE="$DEFAULT_IMAGE_TAG"; break ;;
+            c|C)
+                read -p "Enter image name (e.g. ubuntu-22.04): " custom
+                if [ -n "$custom" ]; then SELECTED_IMAGE="$custom"; break; fi
+                ;;
+            *)
+                if echo "$ans" | grep -Eq '^[0-9]+$'; then
+                    choice=$(echo "$IMAGES" | sed -n "${ans}p")
+                    if [ -n "$choice" ]; then SELECTED_IMAGE="$choice"; break; fi
+                fi
+                echo "Invalid selection."
+                ;;
+        esac
+    done
+    echo "Selected image: $SELECTED_IMAGE"
+}
+
+# --- Commands ---
+
+create_cluster() {
+    local CLUSTER_NAME=""
+    local WORKER_SIZE=$DEFAULT_WORKERS
+    local MASTER_CPU=$DEFAULT_MASTER_CPU
+    local MASTER_MEM=$DEFAULT_MASTER_MEM
+    local MASTER_DISK=$DEFAULT_MASTER_DISK
+    local WORKER_CPU=$DEFAULT_WORKER_CPU
+    local WORKER_MEM=$DEFAULT_WORKER_MEM
+    local WORKER_DISK=$DEFAULT_WORKER_DISK
+    local INTERACTIVE=false
+    SELECTED_IMAGE=""
+
+    # Check for help or flags
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name) CLUSTER_NAME="$2"; shift 2 ;;
+            -w|--workers) WORKER_SIZE="$2"; shift 2 ;;
+            --image) SELECTED_IMAGE="$2"; shift 2 ;;
+            --cpu) MASTER_CPU="$2"; WORKER_CPU="$2"; shift 2 ;;
+            --mem) MASTER_MEM="$2"; WORKER_MEM="$2"; shift 2 ;;
+            --disk) MASTER_DISK="$2"; WORKER_DISK="$2"; shift 2 ;;
+            -h|--help)
+                echo "Usage: $(basename "$0") create [OPTIONS]"
+                echo "Options:"
+                echo "  -n, --name <NAME>    Cluster name"
+                echo "  -w, --workers <NUM>  Number of worker nodes (Default: $DEFAULT_WORKERS)"
+                echo "  --image <IMG>        Multipass image (e.g. 24.04)"
+                echo "  --cpu <NUM>          CPU cores per node (Default: $DEFAULT_MASTER_CPU)"
+                echo "  --mem <SIZE>         Memory per node (Default: $DEFAULT_MASTER_MEM)"
+                echo "  --disk <SIZE>        Disk size per node (Default: $DEFAULT_MASTER_DISK)"
+                exit 0
+                ;;
+            *) echo "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    # Enter interactive mode if name missing
+    if [ -z "$CLUSTER_NAME" ]; then
+        INTERACTIVE=true
+        echo "ENTERING INTERACTIVE MODE"
+        read -p "Cluster Name: " CLUSTER_NAME
+        if [ -z "$CLUSTER_NAME" ]; then echo "Cluster name is required."; exit 1; fi
+        
+        read -p "Worker Size [Default: $WORKER_SIZE]: " input
+        WORKER_SIZE=${input:-$WORKER_SIZE}
+    fi
+
+    select_multipass_image
+
+    local NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
+    
+    echo "Creating cluster '$CLUSTER_NAME' with image '$SELECTED_IMAGE'..."
+
+    # Master Node
+    echo "Launching master node..."
+    INSTALL_K3S_EXEC_FINAL="--cluster-init --disable=traefik"
+    if [ -n "$INSTALL_K3S_EXEC" ]; then
+        INSTALL_K3S_EXEC_FINAL="$INSTALL_K3S_EXEC_FINAL $INSTALL_K3S_EXEC"
+    fi
+
+    cat > master.yaml <<EOF
+package_update: true
+packages:
+  - curl
+runcmd:
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC_FINAL}" sh -
+  - mkdir -p /etc/k3s
+EOF
+
+    multipass launch "$SELECTED_IMAGE" --name ${CLUSTER_NAME}-master --cpus $MASTER_CPU --memory $MASTER_MEM --disk $MASTER_DISK ${NETWORK_NAME:+--network $NETWORK_NAME} --cloud-init master.yaml
+    rm -f master.yaml
+
+    # Initialize k3s
+    echo "Initializing k3s..."
+    MASTER_IP=$(multipass exec ${CLUSTER_NAME}-master -- hostname -I | awk '{print $1}')
+    NODE_TOKEN=$(multipass exec ${CLUSTER_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
+
+    # Worker Nodes
+    for i in $(seq 1 $WORKER_SIZE); do
+        echo "Launching worker node $i..."
+        cat > worker-${i}.yaml <<EOF
+package_update: true
+packages:
+  - curl
+runcmd:
+  - curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -
+EOF
+        multipass launch "$SELECTED_IMAGE" --name ${CLUSTER_NAME}-worker${i} --cpus $WORKER_CPU --memory $WORKER_MEM --disk $WORKER_DISK ${NETWORK_NAME:+--network $NETWORK_NAME} --cloud-init worker-${i}.yaml
+        rm -f worker-${i}.yaml
+    done
+
+    echo "Generating kubeconfig..."
+    multipass exec ${CLUSTER_NAME}-master -- sudo cat /etc/rancher/k3s/k3s.yaml | sed -e "s/127.0.0.1/$MASTER_IP/g" -e "s/default/${CLUSTER_NAME}-context/g" > $HOME/.kube/config-${CLUSTER_NAME}
+
+    echo "Cluster '$CLUSTER_NAME' created successfully!"
+    echo "Kubeconfig: $HOME/.kube/config-${CLUSTER_NAME}"
+}
+
+add_worker() {
+    local CLUSTER_NAME=""
+    local ADD_COUNT=1
+    # Fallback to defaults, ideally should check master node specs but keep simple for now
+    local CPU=$DEFAULT_WORKER_CPU
+    local MEM=$DEFAULT_WORKER_MEM
+    local DISK=$DEFAULT_WORKER_DISK
+    SELECTED_IMAGE="" 
+    local INTERACTIVE=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name) CLUSTER_NAME="$2"; shift 2 ;;
+            -c|--count) ADD_COUNT="$2"; shift 2 ;;
+            --image) SELECTED_IMAGE="$2"; shift 2 ;;
+            -h|--help)
+                echo "Usage: $(basename "$0") add-worker -n <NAME> [OPTIONS]"
+                exit 0
+                ;;
+            *) echo "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    if [ -z "$CLUSTER_NAME" ]; then
+         echo "Error: Cluster name is required (-n)"
+         exit 1
+    fi
+    
+    # Try to detect image from master
+    if [ -z "$SELECTED_IMAGE" ]; then
+       # Simple heuristic: try to find master image. 
+       # Multipass 'info' command or 'ls' output parsing is tricky to get exact image name.
+       # For now, default to env or standard default if not provided.
+       select_multipass_image
+    else 
+       echo "Using specified image: $SELECTED_IMAGE"
+    fi
+
+    MASTER_IP=$(multipass exec ${CLUSTER_NAME}-master -- hostname -I | awk '{print $1}')
+    NODE_TOKEN=$(multipass exec ${CLUSTER_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
+    NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
+    
+    CURRENT_SIZE=$(multipass ls | grep ^${CLUSTER_NAME}-worker | wc -l | awk '{print $1}')
+    CURRENT_SIZE=${CURRENT_SIZE:-0}
+    START_COUNT=$(( $CURRENT_SIZE + 1 ))
+    END_COUNT=$(( $CURRENT_SIZE + $ADD_COUNT ))
+
+    for i in $(seq $START_COUNT $END_COUNT); do
+        echo "Launching worker node $i..."
+        cat > worker-${i}.yaml <<EOF
+package_update: true
+packages:
+  - curl
+runcmd:
+  - curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -
+EOF
+        multipass launch "$SELECTED_IMAGE" --name ${CLUSTER_NAME}-worker${i} --cpus $CPU --memory $MEM --disk $DISK ${NETWORK_NAME:+--network $NETWORK_NAME} --cloud-init worker-${i}.yaml
+        rm -f worker-${i}.yaml
+    done
+    echo "$ADD_COUNT workers added."
+}
+
+vm_create() {
+    # Interactive VM creation
+    if [[ $# -gt 0 && "$1" == "--help" ]]; then
+       echo "Usage: $(basename "$0") vm create"
+       echo "  (Starts interactive wizard)"
+       exit 0
+    fi
+
+    # Only create supported for now
+    if [[ "$1" != "create" ]]; then
+        echo "Usage: k3s-helper vm create"
+        exit 1
+    fi
+    
+    local INTERACTIVE=true
+    local CPU MEM DISK NAME MOUT_PATH
+    SELECTED_IMAGE=""
+
+    echo "--- VM Creation Wizard ---"
+    read -p "CPU [Default: $DEFAULT_WORKER_CPU]: " CPU
+    CPU=${CPU:-$DEFAULT_WORKER_CPU}
+    
+    read -p "Memory (GB) [Default: 2]: " MEM
+    MEM=${MEM:-2}
+    
+    read -p "Disk (GB) [Default: 10]: " DISK
+    DISK=${DISK:-10}
+
+    read -p "Mount Path [Optional]: " MOUNT_PATH
+    
+    read -p "Instance Name: " NAME
+    if [ -z "$NAME" ]; then echo "Name required."; exit 1; fi
+
+    select_multipass_image
+
+    echo "Creating VM: $NAME ($SELECTED_IMAGE, ${CPU}CPU, ${MEM}G, ${DISK}G)"
+    if [ -n "$MOUNT_PATH" ]; then echo "Mount: $MOUNT_PATH"; fi
+
+    local NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
+
+    CMD="multipass launch $SELECTED_IMAGE --name $NAME --cpus $CPU --memory ${MEM}G --disk ${DISK}G ${NETWORK_NAME:+--network $NETWORK_NAME}"
+    if [ -n "$MOUNT_PATH" ]; then
+        CMD="$CMD --mount $MOUNT_PATH"
+    fi
+    
+    echo "Running: $CMD"
+    $CMD
+    echo "VM Created."
+}
+
+tls_san() {
+    # Existing implementation
+    local CLUSTER_NAME=""
+    local DOMAIN=""
+    local APPLY=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name) CLUSTER_NAME="$2"; shift 2 ;;
+            -d|--domain) DOMAIN="$2"; shift 2 ;;
+            --apply) APPLY=true; shift ;;
+            *) break ;; 
+        esac
+    done
+
+    if [ -z "$CLUSTER_NAME" ]; then
+        echo "Error: Cluster name is required (-n)"
+        exit 1
+    fi
+
+    echo "Updating TLS SAN for $CLUSTER_NAME..."
+    TEMP_FILE="${CLUSTER_NAME}_config.txt"
+    echo "tls-san:" > $TEMP_FILE
+    if [ -n "$DOMAIN" ]; then echo "  - $DOMAIN" >> $TEMP_FILE; fi
+
+    MASTER_IPS=$(multipass exec ${CLUSTER_NAME}-master -- ip a | grep -v grep | grep enp | grep inet | awk '{print$2}' | awk -F/ '{print$1}')
+    for ip in $MASTER_IPS; do echo "  - $ip" >> $TEMP_FILE; done
+
+    cat $TEMP_FILE
+    
+    if [ "$APPLY" = false ]; then
+        read -p "Apply this config? [y/N] " response
+        case "$response" in
+            [yY]*) APPLY=true ;;
+            *) echo "Aborted."; rm -f $TEMP_FILE; exit 0 ;;
+        esac
+    fi
+
+    if [ "$APPLY" = true ]; then
+        cat $TEMP_FILE | multipass exec ${CLUSTER_NAME}-master -- sudo tee /etc/rancher/k3s/config.yaml
+        rm -f $TEMP_FILE
+        echo "Restarting k3s..."
+        multipass exec ${CLUSTER_NAME}-master -- sudo systemctl restart k3s
+        echo "Done."
+    fi
+}
+
+# Main Dispatcher
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+COMMAND=$1
+shift
+
+case $COMMAND in
+    create) create_cluster "$@" ;;
+    add-worker) add_worker "$@" ;;
+    tls-san) tls_san "$@" ;;
+    vm) vm_create "$@" ;;
+    -h|--help) usage ;;
+    *) echo "Unknown command: $COMMAND"; usage ;;
+esac
