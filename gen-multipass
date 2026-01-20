@@ -1,0 +1,25 @@
+multipass() {
+  if [ "$1" = "launch" ]; then
+    if [ -n "${IMAGE}" ]; then
+      # --image 옵션이 있으면 제거하고 이미지를 첫 번째 인자로 추가
+      ARGS=()
+      SKIP_NEXT=false
+      for arg in "${@:2}"; do
+        if [ "${SKIP_NEXT}" = "true" ]; then
+          SKIP_NEXT=false
+          continue
+        fi
+        if [ "$arg" = "--image" ]; then
+          SKIP_NEXT=true
+          continue
+        fi
+        ARGS+=("$arg")
+      done
+      echo "image is ${IMAGE} args is ${ARGS[@]}"
+      command multipass launch "${IMAGE}" "${ARGS[@]}"
+      return $?
+    fi
+  fi
+  echo "multipass args is ${@}"
+  command multipass "$@"
+}

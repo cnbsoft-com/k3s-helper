@@ -24,7 +24,7 @@ CURRENT_SIZE=${CURRENT_SIZE:-0}
 
 echo "current size is ${CURRENT_SIZE}"
 
-IMAGE=ubuntu-$(multipass ls | grep ^${CONTEXT_NAME}-master | awk '{print $5}')
+IMAGE=$(multipass ls | grep ^${CONTEXT_NAME}-master | awk '{print $5}')
 NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
 MASTER_IP=$(multipass exec ${CONTEXT_NAME}-master -- hostname -I | awk '{print $1}')
 NODE_TOKEN=$(multipass exec ${CONTEXT_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
