@@ -1,9 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 
 # ==============================================================================
-# Script Name: find_cmd.sh
-# Description: Checks if a specific command exists in the system's PATH.
-# Usage: ./find_cmd.sh <command_name>
+# Script Name: cmd_exam.sh
+# Description: Checks if a specific command exists and lists Ubuntu images.
 # ==============================================================================
 
 # Input validation
@@ -16,7 +15,6 @@ fi
 CMD_NAME=$1
 
 # Use 'command -v' to locate the command
-# It is more portable and reliable than 'which' in shell scripts
 CMD_PATH=$(command -v "$CMD_NAME")
 
 if [ -n "$CMD_PATH" ]; then
@@ -26,3 +24,10 @@ else
     echo "❓ Not Found: Command '$CMD_NAME' is not in your PATH."
     exit 1
 fi
+
+CMD="multipass"
+echo ""
+echo "--- Ubuntu Images ---"
+$CMD find | grep "Ubuntu" | while read -r line; do
+    echo "Found: $line"
+done

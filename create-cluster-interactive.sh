@@ -14,48 +14,37 @@ validate_multipass_cmd() {
   if ! command -v multipass &> /dev/null; then
     echo "multipass command not found. Please install multipass first."
     exit 1
+  else
+    echo "multipass command found."
   fi
 }
 
 trap cleanup EXIT ERR
 
-usage() {
-    echo "Usage: $0 <context_name> [worker_size] [options]"
-    echo ""
-    echo "Arguments:"
-    echo "  context_name    : Required. Name for the cluster context"
-    echo "  worker_size     : Optional. Number of worker nodes (default: 2)"
-    echo ""
-    echo "Environment Variables:"
-    echo "  MASTER_CPU      : Master node CPU cores (default: 2)"
-    echo "  MASTER_MEM      : Master node memory (default: 2G)"
-    echo "  MASTER_DISK     : Master node disk size (default: 10G)"
-    echo "  WORKER_CPU      : Worker node CPU cores (default: 2)"
-    echo "  WORKER_MEM      : Worker node memory (default: 2G)"
-    echo "  WORKER_DISK     : Worker node disk size (default: 10G)"
-    echo "  INSTALL_K3S_EXEC: Additional k3s installation options"
-    echo ""
-    echo "Example:"
-    echo "  $0 my-cluster 3"
-    echo "  MASTER_CPU=4 MASTER_MEM=4G $0 my-cluster 2"
-    exit 1
-}
-
-
 set_context_name() {
-  CONTEXT_NAME=$1
-}
+  read -p "Enter context name(Conext name will be used as k8s cluster name and multipass instance prefix): " CONTEXT_NAME
+  echo "Context name is ${CONTEXT_NAME}"
 
-check_validation() {
   if [ -z $CONTEXT_NAME ]; then
     echo "Error: Context name is required"
-    usage
+    set_context_name
+  else
+    check_duplicate_context_name
   fi
 }
 
+check_duplicate_context_name() {
+  if [ $(multipass ls | grep ^${CONTEXT_NAME}-master | wc -l) -ne 0 ]; then
+    echo "Error: Context name is aleady used. Please use another name."
+    set_context_name
+  fi
+}
 
 set_worker_size() {
-  WORKER_SIZE=${1:-2}
+  read -p "Enter worker size(default: 2): " WORKER_SIZE
+  if [ -z $WORKER_SIZE ]; then
+    WORKER_SIZE=2
+  fi
 }
 
 set_network_name() {
@@ -66,20 +55,9 @@ set_network_name() {
 
 # 사용자가 IMAGE/MULTIPASS_IMAGE를 미지정 시 인터랙티브로 이미지 선택
 select_multipass_image() {
-  # 우선순위: IMAGE > 인터랙티브 선택
-  # if [ -n "${IMAGE}" ]; then
-  #   echo "Multipass image preset by IMAGE: ${IMAGE}"
-  #   return 0
-  # fi
-
-  # 후보 이미지 검색 (ubuntu 계열 우선: 24.04/22.04 등)
   echo "Multipass 이미지 목록을 검색합니다..."
-  # IMAGES="$(command multipass find 2>/dev/null \
-  #   | awk 'NR>1 {print $1}' \
-  #   | grep -E '^[0-9]{2}\.[0-9]{2}$' \
-  #   | sort -u)"
-
   CMD="multipass"
+
   IMAGES=()
   while IFS= read -r line; do
       # Only include lines where the description contains "Ubuntu"
@@ -101,106 +79,33 @@ select_multipass_image() {
   $CMD find | head -n 1
   echo "--------------------------------------------------------------------------------"
 
-
-  # for i in $(multipass find 2>/dev/null | awk 'NR>1 {print $1}' | grep -E '^[0-9]{2}\.[0-9]{2}$' | sort -u); do 
-  #   DEFAULT_IMAGE=$i; 
-  # done
-
-  # echo "##### Default image is ${DEFAULT_IMAGE} ####"
-
-  # echo "사용할 이미지를 선택하세요:"
-  # printf "%s\n" ${IMAGES} | nl -w2 -s'. '
-  # echo "  c. 직접 입력 (custom)"
-
   # Set prompt for selection
   PS3="
   👉 Select an image number (or 'q' to quit): "
 
   # Provide selection menu
-select choice in "${IMAGES[@]}"; do
-    if [[ "$REPLY" == "q" ]]; then
-        echo "👋 Exiting..."
-        exit 0
-    elif [ -n "$choice" ]; then
-        # Extract the first column (Image/Alias) as the selected image name
-        IMAGE=$(echo "$choice" | awk '{print $1}')
-        
-        echo ""
-        echo "✅ Selection Confirmed!"
-        echo "------------------------------------------------"
-        echo "Selected Image: $IMAGE"
-        echo "Full Detail   : $choice"
-        echo "------------------------------------------------"
-        
-        # You can add further logic here, like:
-        # multipass launch "$IMAGE"
-        
-        break
-    else
-        echo "⚠️  Invalid selection. Please enter a number from the list above."
-    fi
-done
-
-  # while :; do
-  #   printf "번호를 입력하세요 (기본: %s): " "${DEFAULT_IMAGE}"
-  #   read ans
-  #   case "${ans}" in
-  #     "" )
-  #       IMAGE="${DEFAULT_IMAGE}"
-  #       break
-  #       ;;
-  #     c|C )
-  #       printf "이미지 이름을 입력하세요 (예: 24.04): "
-  #       read custom
-  #       if [ -n "${custom}" ]; then
-  #         IMAGE="${custom}"
-  #         break
-  #       fi
-  #       ;;
-  #     * )
-  #       # 숫자 선택 처리
-  #       if echo "${ans}" | grep -Eq '^[0-9]+$'; then
-  #         choice="$(printf "%s\n" ${IMAGES} | sed -n "${ans}p")"
-  #         if [ -n "${choice}" ]; then
-  #           IMAGE="${choice}"
-  #           break
-  #         fi
-  #       fi
-  #       ;;
-  #   esac
-  #   echo "유효하지 않은 입력입니다. 다시 시도하세요."
-  # done
-
+  select choice in "${IMAGES[@]}"; do
+      if [[ "$REPLY" == "q" ]]; then
+          echo "👋 Exiting..."
+          exit 0
+      elif [ -n "$choice" ]; then
+          # Extract the first column (Image/Alias) as the selected image name
+          IMAGE=$(echo "$choice" | awk '{print $1}')
+          
+          echo ""
+          echo "✅ Selection Confirmed!"
+          echo "------------------------------------------------"
+          echo "Selected Image: $IMAGE"
+          echo "Full Detail   : $choice"
+          echo "------------------------------------------------"
+          break
+      else
+          echo "⚠️  Invalid selection. Please enter a number from the list above."
+      fi
+  done
   echo "선택된 이미지: ${IMAGE}"
   return 0
 }
-
-# multipass 서브커맨드 래퍼: launch 시 자동으로 이미지를 첫 번째 인자로 삽입
-# multipass() {
-#   if [ "$1" = "launch" ]; then
-#     if [ -n "${IMAGE}" ]; then
-#       # --image 옵션이 있으면 제거하고 이미지를 첫 번째 인자로 추가
-#       ARGS=()
-#       SKIP_NEXT=false
-#       for arg in "${@:2}"; do
-#         if [ "${SKIP_NEXT}" = "true" ]; then
-#           SKIP_NEXT=false
-#           continue
-#         fi
-#         if [ "$arg" = "--image" ]; then
-#           SKIP_NEXT=true
-#           continue
-#         fi
-#         ARGS+=("$arg")
-#       done
-#       command multipass launch "${IMAGE}" "${ARGS[@]}"
-#       return $?
-#     fi
-#   fi
-#   command multipass "$@"
-# }
-# --- END ADD ---
-
 
 set_install_k3s_exec() {
   ## 예시 1: etcd + flannel (기본 vxlan)
@@ -213,7 +118,7 @@ set_install_k3s_exec() {
   read -p "Disable traefik(default: n)? (y/n): " disable_traefik
   read -p "Disable flannel(default: n)? (y/n): " disable_flannel
   read -p "Disable servicelb(default: n)? (y/n): " disable_servicelb
-  read -p "Disable local(default: n)? (y/n): " disable_local
+  read -p "Disable local storage(default: n)? (y/n): " disable_local
   read -p "Disable metrics-server(default: n)? (y/n): " disable_metrics_server
 
   if [ "$disable_traefik" = "y" ]; then
@@ -242,7 +147,7 @@ set_install_k3s_exec() {
 }
 
 create_master() {
-cat > .master.yaml <<EOF
+  cat > .master.yaml <<EOF
 package_update: true
 packages:
   - curl
@@ -289,17 +194,20 @@ print_info() {
   echo "NETWORK_NAME name: ${NETWORK_NAME}"
   echo "WORKER SIZE: $WORKER_SIZE"
   echo "Multipass image: ${IMAGE}"
+
+  read -p "Create cluster? (y/n): " create_cluster
+  if [ "$create_cluster" != "y" ]; then
+    echo "Aborting..."
+    exit 1
+  fi
 }
 
-select_multipass_image
-exit
 validate_multipass_cmd
-
-set_context_name $1
-check_validation
-set_worker_size $2
+set_context_name
+set_worker_size
 set_network_name
-# select_multipass_image
+
+select_multipass_image
 set_install_k3s_exec
 print_info
 
