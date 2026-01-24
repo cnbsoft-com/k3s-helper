@@ -21,6 +21,8 @@ validate_multipass_cmd() {
 
 trap cleanup EXIT ERR
 
+
+
 set_context_name() {
   read -p "Enter context name(Conext name will be used as k8s cluster name and multipass instance prefix): " CONTEXT_NAME
   echo "Context name is ${CONTEXT_NAME}"
@@ -55,7 +57,7 @@ set_network_name() {
 
 # 사용자가 IMAGE/MULTIPASS_IMAGE를 미지정 시 인터랙티브로 이미지 선택
 select_multipass_image() {
-  echo "Multipass 이미지 목록을 검색합니다..."
+  echo "Searching for Ubuntu images..."
   CMD="multipass"
 
   IMAGES=()
@@ -91,7 +93,8 @@ select_multipass_image() {
       elif [ -n "$choice" ]; then
           # Extract the first column (Image/Alias) as the selected image name
           IMAGE=$(echo "$choice" | awk '{print $1}')
-          
+          SELECTED_IMAGE=$choice
+
           echo ""
           echo "✅ Selection Confirmed!"
           echo "------------------------------------------------"
@@ -103,8 +106,102 @@ select_multipass_image() {
           echo "⚠️  Invalid selection. Please enter a number from the list above."
       fi
   done
-  echo "선택된 이미지: ${IMAGE}"
-  return 0
+  # echo "Choice image: ${SELECTED_IMAGE}"
+  # return 0
+}
+
+
+built_in_specs=(
+  "2cpus, 2G memory, 10G disk"
+  "4cpus, 4G memory, 20G disk"
+  "8cpus, 8G memory, 40G disk"
+  "Custom"
+)
+
+built_in_spec_map=(
+  "--cpus 2 --memory 2G --disk 10G"
+  "--cpus 4 --memory 4G --disk 20G"
+  "--cpus 8 --memory 8G --disk 40G"
+)
+
+set_custom_master_spec() {
+  read -p "Enter cpu count: " CPU_COUNT
+  read -p "Enter memory size: " MEMORY_SIZE
+  read -p "Enter disk size: " DISK_SIZE
+
+  if ! echo "$CPU_COUNT" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid cpu count"
+    set_custom_master_spec
+  fi
+
+  if ! echo "$MEMORY_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid memory size"
+    set_custom_master_spec
+  fi
+
+  if ! echo "$DISK_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid disk size"
+    set_custom_master_spec
+  fi
+
+  MASTER_SPEC="--cpus ${CPU_COUNT} --memory ${MEMORY_SIZE}G --disk ${DISK_SIZE}G"
+  echo "MASTER_SPEC is ${MASTER_SPEC}"
+}
+
+set_master_spec () {
+  PS3="
+  👉 Select master spec : "
+  select choice in "${built_in_specs[@]}"; do
+    if [ "$REPLY" == "4" ]; then
+      set_custom_master_spec
+      break
+    elif [ -n "$choice" ]; then
+      MASTER_SPEC=${built_in_spec_map[$REPLY-1]}
+      break
+    else
+      echo "⚠️ Invalid selection. Please enter a number from the list above."
+    fi
+  done
+}
+
+set_custom_worker_spec() {
+  read -p "Enter cpu count: " CPU_COUNT
+  read -p "Enter memory size: " MEMORY_SIZE
+  read -p "Enter disk size: " DISK_SIZE
+
+  if ! echo "$CPU_COUNT" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid cpu count"
+    set_custom_worker_spec
+  fi
+
+  if ! echo "$MEMORY_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid memory size"
+    set_custom_worker_spec
+  fi
+
+  if ! echo "$DISK_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid disk size"
+    set_custom_worker_spec
+  fi
+
+  WORKER_SPEC="--cpus ${CPU_COUNT} --memory ${MEMORY_SIZE}G --disk ${DISK_SIZE}G"
+  echo "WORKER_SPEC is ${WORKER_SPEC}"
+}
+
+set_worker_spec () {
+  PS3="
+  👉 Select worker spec : "
+  select choice in "${built_in_specs[@]}"; do
+    if [ "$REPLY" == "4" ]; then
+      set_custom_worker_spec
+      break
+    elif [ -n "$choice" ]; then
+      WORKER_SPEC=${built_in_spec_map[$REPLY-1]}
+      break
+    else
+      echo "⚠️ Invalid selection. Please enter a number from the list above."
+    fi
+  done
 }
 
 set_install_k3s_exec() {
@@ -115,31 +212,31 @@ set_install_k3s_exec() {
   ### curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init --disable=traefik" sh -
   # traefik 비활성화 (Istio 사용을 위해)
 
-  read -p "Disable traefik(default: n)? (y/n): " disable_traefik
-  read -p "Disable flannel(default: n)? (y/n): " disable_flannel
-  read -p "Disable servicelb(default: n)? (y/n): " disable_servicelb
-  read -p "Disable local storage(default: n)? (y/n): " disable_local
-  read -p "Disable metrics-server(default: n)? (y/n): " disable_metrics_server
+  read -p "Use traefik(default: y)? (y/n). If you use istio, disable traefik: " use_traefik
+  read -p "Use flannel(default: y)? (y/n): " use_flannel
+  read -p "Use servicelb(default: y)? (y/n): " use_servicelb
+  read -p "Use local storage(default: y)? (y/n): " use_local
+  read -p "Use metrics-server(default: y)? (y/n): " use_metrics_server
 
-  if [ "$disable_traefik" = "y" ]; then
+  if [ "$use_traefik" = "n" ]; then
     INSTALL_K3S_EXEC="--cluster-init --disable=traefik"
   else
     INSTALL_K3S_EXEC="--cluster-init"
   fi
 
-  if [ "$disable_flannel" = "y" ]; then
+  if [ "$use_flannel" = "n" ]; then
     INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --flannel-backend=none --disable-network-policy"
   fi
 
-  if [ "$disable_servicelb" = "y" ]; then
+  if [ "$use_servicelb" = "n" ]; then
     INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --disable=servicelb"
   fi
 
-  if [ "$disable_local" = "y" ]; then
+  if [ "$use_local" = "n" ]; then
     INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --disable=local-storage"
   fi
 
-  if [ "$disable_metrics_server" = "y" ]; then
+  if [ "$use_metrics_server" = "n" ]; then
     INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --disable=metrics-server"
   fi
 
@@ -204,7 +301,9 @@ print_info() {
 
 validate_multipass_cmd
 set_context_name
+set_master_spec
 set_worker_size
+set_worker_spec
 set_network_name
 
 select_multipass_image

@@ -20,6 +20,11 @@ select_cluster() {
         CLUSTERS+=("$line")
     done < <($CMD ls | grep master | awk '{print $1}')
 
+    if [ ${#CLUSTERS[@]} -eq 0 ]; then
+        echo "No clusters found. Exiting..."
+        exit 1
+    fi
+
     echo ""
     echo "📋 Available Ubuntu Images:"
     echo "--------------------------------------------------------------------------------"
@@ -58,9 +63,9 @@ built_in_specs=(
 )
 
 built_in_spec_map=(
-  "-- cpus 2 --memory 2G --disk 10G"
-  "-- cpus 4 --memory 4G --disk 20G"
-  "-- cpus 8 --memory 8G --disk 40G"
+  "--cpus 2 --memory 2G --disk 10G"
+  "--cpus 4 --memory 4G --disk 20G"
+  "--cpus 8 --memory 8G --disk 40G"
 )
 
 set_custom_spec() {
@@ -149,6 +154,9 @@ set_node_token() {
 set_start_end_number() {
     START_NUMBER=$(( $LAST_WORKER_NUMBER + 1 ))
     END_NUMBER=$(( $LAST_WORKER_NUMBER + $WORKER_SIZE))
+
+    echo "START_NUMBER is ${START_NUMBER}"
+    echo "END_NUMBER is ${END_NUMBER}"
 }
 
 create_workers() {
@@ -162,6 +170,7 @@ runcmd:
   - curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -
 EOF
 
+echo "${CONTEXT_NAME}-worker${i} ${WORKER_SPEC} ${NETWORK_NAME} ${VM_IMAGE}"
     multipass launch --name ${CONTEXT_NAME}-worker${i} ${WORKER_SPEC} --network ${NETWORK_NAME} --cloud-init .worker-${i}.yaml
     rm -f ./.worker-${i}.yaml
   done
