@@ -16,11 +16,12 @@ built_in_spec_map=(
 )
 
 sub_commands=(
-  "init-kubeconfig"
-  "generate-cluster"
-  "tls-san"
-  "add-worker"
-  "list-clusters"
+  "init"
+  "generate"
+  "tls"
+  "add"
+  "list"
+  "delworker"
   "usage"
 )
 sub_command_messages=(
@@ -29,18 +30,46 @@ sub_command_messages=(
   "Add TLS SAN config to master node"
   "Add a worker to the cluster"
   "List all clusters"
+  "Delete worker"
   "Usage"
 )
 
 CMD="multipass"
 
 usage() {
-  echo "Usage: $0 <subcommand>"
-  echo "Subcommands:"
-  for i in ${!sub_commands[@]}; do
-    echo "  ${sub_commands[$i]} - ${sub_command_messages[$i]}"
-  done
-  exit 1
+  cat << 'EOF'
+mpk3s - Multipass K3s Cluster Management CLI
+Usage:
+  mpk3s [command]
+Commands:
+  init       Initialize kubeconfig script for multi-cluster management
+  generate   Create a new K3s cluster with master and worker nodes
+  add        Add worker nodes to an existing cluster
+  tls        Add TLS SAN configuration to master node
+  list       List all Multipass K3s clusters
+  delworker  Delete worker nodes from an existing cluster
+  help, -h   Show this help message
+Examples:
+  mpk3s                  # Interactive mode - show command menu
+  mpk3s generate         # Create new cluster interactively
+  mpk3s add              # Add workers to existing cluster
+  mpk3s init             # Create ~/.kube-config.sh script
+Cluster Specs (interactive selection):
+  - Small:   2 CPUs,  2G memory, 10G disk
+  - Medium:  4 CPUs,  4G memory, 20G disk
+  - Large:   8 CPUs,  8G memory, 40G disk
+  - Custom:  User-defined specifications
+K3s Options (prompted during generation):
+  - traefik        Ingress controller (default: enabled)
+  - flannel        CNI plugin (default: enabled)
+  - servicelb      LoadBalancer (default: enabled)
+  - local-storage  Storage class (default: enabled)
+  - metrics-server Metrics API (default: enabled)
+Prerequisites:
+  - Multipass installed (https://multipass.run)
+  - Network access for downloading K3s
+EOF
+  exit 0
 }
 
 cleanup() {
@@ -485,8 +514,124 @@ print_cluster_state() {
   multipass exec ${CLUSTER_NAME}-master -- sudo kubectl get nodes
   echo "--------------------------------------------------------------------------------"
 }
-
 ###### Add Worker End ######
+
+###### Add TLS SAN Satrt #####
+# set cluster_name, domain, temp_file_name, isApply
+
+readClusterName() {
+  read -p "cluster name : " cluster_name
+  temp_file_name="${cluster_name}_config.txt"
+}
+
+readDomainName(){
+  read -p "domain name[not mandatory] : " domain
+}
+
+confirmTypeInfo(){
+  echo "Cluster Name is ${cluster_name}"
+  if [[ ! -z $domain ]]; then
+    echo "Domain is ${domain}"
+  fi
+
+  read -p "Apply config?[Y/n]" isApply
+}
+
+writeTempTlsSanConfig(){
+  echo "tls-san:" > $temp_file_name
+  if [[ ! -z $domain ]]; then
+    echo "  - $domain" >> $temp_file_name
+  fi
+
+  for i in $(multipass exec ${cluster_name}-master -- ip a | grep -v grep | grep enp | grep inet | awk '{print$2}' | awk -F/ '{print$1}'); do
+    config="${config}  - ${i}\r\n"
+    cat<<EOF >> $temp_file_name
+  - ${i}
+EOF
+  done
+}
+
+applyTlsSanConfig(){
+  cat $temp_file_name | multipass exec ${cluster_name}-master -- sudo tee /etc/rancher/k3s/config.yaml
+  rm -rf $temp_file_name
+  echo "restarting k3s service..."
+  multipass exec ${cluster_name}-master -- sudo systemctl restart k3s
+  echo "finished job"
+}
+###### Add TLS SAN End #####
+###### Delete Worker Start #####
+
+cluster_list=()
+selected_cluster=""
+select_cluster_list() {
+  cluster_list=$(multipass ls | grep master | awk '{print$1}')
+  echo "--------------------------------"
+  echo "Cluster name"
+  echo "--------------------------------"
+  PS3="
+👉 Select cluster : "
+  select choice in "${cluster_list[@]}"; do
+    if [ -n "$choice" ]; then
+      selected_cluster=$(sed -e "s/-master//g" <<< $choice)
+      break
+    else
+      echo "⚠️  Invalid selection. Please enter a number from the list above."
+    fi
+  done
+
+  echo "selected cluster is ${selected_cluster}"
+}
+
+selected_worker_list=()
+selected_worker=""
+select_worker_list() {
+  selected_worker_list=$(multipass ls | grep "${selected_cluster}-worker" | awk '{print$1}')
+  echo "--------------------------------------------------------------------------------------------"
+  echo "Worker name(Type number seperated by space to select workers)"
+  echo "--------------------------------------------------------------------------------------------"
+
+  idx=1
+  available_worker_list=()
+  for i in ${selected_worker_list[@]}; do
+    echo "${idx}) ${i}"
+    idx=$((idx+1))
+    available_worker_list+=(${i})
+  done
+
+  read -p "Select worker : " selected_worker
+
+  validate_selected_worker
+}
+
+will_delete_worker_list=()
+validate_selected_worker() {
+  if [[ -z $selected_worker ]]; then
+    echo "Error: No worker selected"
+    exit 1
+  else
+    echo "selected worker is ${selected_worker}"
+    for i in ${selected_worker}; do
+      if [[ "${available_worker_list[@]}" != *"${i}"* ]]; then
+        echo "Error: ${selected_cluster}-worker${i} not found"
+      elif [[ -n $i ]]; then
+        will_delete_worker_list+=(${i})
+      fi
+    done
+  fi
+}
+
+delete_worker() {
+  for i in ${will_delete_worker_list[@]}; do
+    echo "${selected_cluster}-worker${i} will be deleted"
+    read -p "Delete ${selected_cluster}-worker${i}? It is not recoverable [Y/n]: " isApply
+    if [[ -z $isApply || "Y" == $isApply ]]; then
+      multipass delete ${selected_cluster}-worker${i}
+      multipass purge
+      echo "${selected_cluster}-worker${i} deleted"
+    fi
+  done
+}
+###### Delete Worker End #####
 
 generate_cluster() {
   verify_multipass_cmd
@@ -519,9 +664,25 @@ add_worker() {
   print_cluster_state
 }
 
+add_tls_san_config() {
+  readClusterName
+  readDomainName
+  confirmTypeInfo
+  if [[ -z $isApply || "Y" == $isApply ]]; then
+    writeTempTlsSanConfig
+    applyTlsSanConfig
+  fi
+}
+
+delete_worker() {
+  select_cluster_list
+  select_worker_list
+  delete_worker
+}
+
 SUB_COMMAND=$1
 
-init_mpk3s() {
+main() {
 
   if [ -z $SUB_COMMAND ]; then
     PS3="
@@ -544,24 +705,30 @@ init_mpk3s() {
   # echo "Selected sub command: $SUB_COMMAND"
 
   case $SUB_COMMAND in
-    "init-kubeconfig")
+    "init")
       init_kubeconfig
       ;;
-    "generate-cluster")
+    "generate")
       generate_cluster
       ;;
-    "add-worker")
+    "tls")
+      add_tls_san_config
+      ;;
+    "add")
       add_worker
       ;;
-    "list-clusters")
+    "list")
       list_clusters
       ;;
-    "usage")
+    "delworker")
+      delete_worker
+      ;;
+    "usage"|"-h"|"--help")
       usage
       ;;
     *)
-      echo "Invalid sub command"
-      exit 1
+      echo "⚠️ Invalid sub command check the usage."
+      usage
       ;;
   esac
 }
@@ -569,4 +736,4 @@ init_mpk3s() {
 
 
 ###### Main Start ######
-init_mpk3s
+main
