@@ -3,13 +3,13 @@
 
 cluster_list=()
 selected_cluster=""
-select_cluster_list() {
+print_and_select_cluster() {
   cluster_list=$(multipass ls | grep master | awk '{print$1}')
   echo "--------------------------------"
-  echo "Cluster name"
+  echo "Available Clusters"
   echo "--------------------------------"
   PS3="
-👉 Select cluster : "
+👉 Select cluster to delete worker: "
   select choice in "${cluster_list[@]}"; do
     if [ -n "$choice" ]; then
       selected_cluster=$(sed -e "s/-master//g" <<< $choice)
@@ -18,29 +18,30 @@ select_cluster_list() {
       echo "⚠️  Invalid selection. Please enter a number from the list above."
     fi
   done
-
-  echo "selected cluster is ${selected_cluster}"
 }
 
 selected_worker_list=()
 selected_worker=""
-select_worker_list() {
-  selected_worker_list=$(multipass ls | grep "${selected_cluster}-worker" | awk '{print$1}')
-  echo "--------------------------------------------------------------------------------------------"
-  echo "Worker name(Type number seperated by space to select workers)"
-  echo "--------------------------------------------------------------------------------------------"
+select_delete_worker_list() {
 
+  echo "--------------------------------------------------------------------------------------------"
+  echo -e "No\t$($CMD ls | head -n 1)"
+  echo "--------------------------------------------------------------------------------------------"
   idx=1
-  available_worker_list=()
-  for i in ${selected_worker_list[@]}; do
-    echo "${idx}) ${i}"
+  while IFS= read -r line; do
+    echo -e "${idx}\t${line}"
+    available_worker_list+=($idx)
+    selected_worker_list+=($(awk '{print$1}' <<< $line))
     idx=$((idx+1))
-    available_worker_list+=(${i})
-  done
-
-  read -p "Select worker : " selected_worker
-
-  validate_selected_worker
+  done < <(multipass ls | grep "${selected_cluster}-worker")
+  if [ -z "$selected_worker_list" ]; then
+    echo "No worker(s) found for cluster ${selected_cluster}"
+    echo "--------------------------------------------------------------------------------------------"
+    exit 1
+  else
+    echo "--------------------------------------------------------------------------------------------"
+    read -p "Type number seperated by space to be deleted workers : " selected_worker
+  fi
 }
 
 will_delete_worker_list=()
@@ -49,33 +50,36 @@ validate_selected_worker() {
     echo "Error: No worker selected"
     exit 1
   else
-    echo "selected worker is ${selected_worker}"
     for i in ${selected_worker}; do
       if [[ "${available_worker_list[@]}" != *"${i}"* ]]; then
         echo "Error: ${selected_cluster}-worker${i} not found"
+        exit 1
       elif [[ -n $i ]]; then
-        will_delete_worker_list+=(${i})
+        will_delete_worker_list+=(${selected_worker_list[$i-1]})
+      else
+        echo "Error: Invalid selection. Please enter a number from the list above."
+        exit 1
       fi
     done
   fi
 }
 
-delete_worker() {
+confirm_delete_worker() {
   for i in ${will_delete_worker_list[@]}; do
-    echo "${selected_cluster}-worker${i} will be deleted"
-    read -p "Delete ${selected_cluster}-worker${i}? It is not recoverable [Y/n]: " isApply
+    read -p "You will now delete '${i}' file. This action can't be undone. [Y/n]: " isApply
     if [[ -z $isApply || "Y" == $isApply ]]; then
-      multipass delete ${selected_cluster}-worker${i}
+      multipass delete ${i}
       multipass purge
-      echo "${selected_cluster}-worker${i} deleted"
+      echo "${i} deleted"
     fi
   done
 }
 
 main() {
-  select_cluster_list
-  select_worker_list
-  delete_worker
+  print_and_select_cluster
+  select_delete_worker_list
+  validate_selected_worker
+  confirm_delete_worker
 }
 
 main
