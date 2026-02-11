@@ -33,6 +33,31 @@ cmd_test() {
     done
 }
 
+# ------------------------------------------------------------------------------
+# Function: is_number
+# Description: 입력받은 문자열이 숫자인지 확인합니다.
+#              정수, 소수, 음수 모두 지원합니다.
+# Usage: is_number <string>
+# Returns: 0 (숫자), 1 (숫자가 아님)
+# ------------------------------------------------------------------------------
+is_number() {
+    if [ -z "$1" ]; then
+        echo "❌ Error: No input provided."
+        echo "Usage: is_number <string>"
+        return 1
+    fi
+
+    local input="$1"
+
+    if [[ "$input" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        echo "✅ '$input' is a number."
+        return 0
+    else
+        echo "❌ '$input' is NOT a number."
+        return 1
+    fi
+}
+
 select_recusive_test() {
 
   built_in_specs=()

@@ -22,7 +22,9 @@ sub_commands=(
   "tls"
   "add"
   "list"
+  "ls"
   "delworker"
+  "delcluster"
   "usage"
 )
 sub_command_messages=(
@@ -32,6 +34,7 @@ sub_command_messages=(
   "Add a worker to the cluster"
   "List all clusters"
   "Delete worker"
+  "Delete cluster"
   "Usage"
 )
 
@@ -47,8 +50,9 @@ Commands:
   generate   Create a new K3s cluster with master and worker nodes
   add        Add worker nodes to an existing cluster
   tls        Add TLS SAN configuration to master node
-  list       List all Multipass K3s clusters
-  delworker  Delete worker nodes from an existing cluster
+  list, ls   List all Multipass K3s clusters
+  delworker  Delete worker nodes from an existing cluster(warning: Do not undo)
+  delcluster Delete cluster(warning: Do not undo)
   help, -h   Show this help message
 Examples:
   mpk3s                  # Interactive mode - show command menu
@@ -76,6 +80,29 @@ EOF
 cleanup() {
   # echo "Delete temporary files"
   rm -rf ./.master.yaml ./.worker-*.yaml ./.k3s-tls-san-*.yaml
+}
+
+# ------------------------------------------------------------------------------
+# Function: is_number
+# Description: 입력받은 문자열이 숫자인지 확인합니다.
+#              정수, 소수, 음수 모두 지원합니다.
+# Usage: is_number <string>
+# Returns: 0 (숫자), 1 (숫자가 아님)
+# ------------------------------------------------------------------------------
+is_number() {
+    if [ -z "$1" ]; then
+        echo "❌ Error: No input provided."
+        echo "Usage: is_number <string>"
+        return 1
+    fi
+
+    local input="$1"
+
+    if [[ "$input" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 ## Global Definitions End ##
 
@@ -627,8 +654,8 @@ validate_selected_worker() {
 
 confirm_delete_worker() {
   for i in ${will_delete_worker_list[@]}; do
-    read -p "You will now delete '${i}' file. This action can't be undone. [Y/n]: " isApply
-    if [[ -z $isApply || "Y" == $isApply ]]; then
+    read -p "You will now delete '${i}' file. This action can't be undone. [y/N]: " isApply
+    if [[ "y" == $isApply ]]; then
       multipass delete ${i}
       multipass purge
       echo "${i} deleted"
@@ -636,6 +663,85 @@ confirm_delete_worker() {
   done
 }
 ###### Delete Worker End #####
+
+###### Delete Cluster Start #####
+
+current_clusters=()
+
+print_and_select_cluster_to_delete() {
+  echo "--------------------------------------------------------------------------------------------"
+  echo -e "No\t$($CMD ls | head -n 1)"
+  echo "--------------------------------------------------------------------------------------------"
+  idx=1
+  while IFS= read -r line; do
+    echo -e "${idx}\t${line}"
+    idx=$((idx+1))
+    current_clusters+=($(awk '{print $1}' <<< $line))
+  done < <($CMD ls | grep -E "^[a-zA-Z0-9_-]+-master\s")
+
+  if [ $idx -gt 1 ]; then
+    echo "--------------------------------------------------------------------------------------------"
+    read -p "Type number to delete cluster : " selected_cluster
+
+    if ! is_number $selected_cluster; then
+      echo "Error: Invalid selection. Please enter a number from the list above."
+      exit 1
+    fi
+
+    if [[ $selected_cluster -gt $idx || $selected_cluster -lt 1 ]]; then
+      echo "Error: Invalid selection. Please enter a number from the list above."
+      exit 1
+    fi
+
+    selected_cluster=$(sed -e "s/-master//g" <<< ${current_clusters[$selected_cluster - 1]})
+  else
+    echo "No cluster found"
+    echo "--------------------------------------------------------------------------------------------"
+    exit 1
+  fi
+}
+
+
+confirm_delete_cluster() {
+  read -p "You will now delete '${selected_cluster}' cluster. This action can't be undone. [y/N]: " isApply
+  if [[ "y" == $isApply ]]; then
+
+    ## Delete Workers
+    while IFS= read -r line; do
+      temp_worker="$(awk '{print $1}' <<< $line)"
+      echo "${temp_worker} deleted"
+      $CMD stop $temp_worker
+      $CMD delete $temp_worker
+    done < <($CMD ls | grep ${selected_cluster}-worker)
+
+    ## Delete Master
+    $CMD stop ${selected_cluster}-master
+    $CMD delete ${selected_cluster}-master
+    $CMD purge
+
+    echo "${selected_cluster} deleted"
+    trap delete_k8s_cluster EXIT ERR
+  else
+    echo "No cluster deleted"
+    exit 0
+  fi
+}
+
+delete_k8s_cluster() {
+  # echo "$HOME/.kube/config-${selected_cluster} deleted"
+  rm -f $HOME/.kube/config-${selected_cluster}
+}
+
+###### Delete Cluster End #####
+
+###### List Up Clusters Start #####
+list_up_clusters() {
+  echo "--------------------------------------------------------------------------------------------"
+  $CMD ls | head -n 1
+  echo "--------------------------------------------------------------------------------------------"
+  $CMD ls | grep -v grep | grep master
+}
+###### List Up Clusters End #####
 
 generate_cluster() {
   verify_multipass_cmd
@@ -685,6 +791,15 @@ delete_worker() {
   confirm_delete_worker
 }
 
+delete_cluster() {
+  print_and_select_cluster_to_delete
+  confirm_delete_cluster
+}
+
+list_clusters() {
+  list_up_clusters
+}
+
 SUB_COMMAND=$1
 
 main() {
@@ -705,9 +820,20 @@ main() {
         exit 1
       fi
     done
-  fi
+    # echo "Select a sub command (or 'q' to quit):"
+    # idx=1
+    # for i in ${sub_commands[@]}; do
+    #   echo "${idx}) ${i}"
+    #   idx=$((idx+1))
+    # done
+    # read -p "Type number to select sub command : " selected_sub_command
 
-  # echo "Selected sub command: $SUB_COMMAND"
+    # if [[ "q" == $selected_sub_command || "Q" == $selected_sub_command ]]; then
+    #   SUB_COMMAND="q"
+    # else
+    #   $SUB_COMMAND=${sub_commands[$selected_sub_command - 1]}
+    # fi
+  fi
 
   case $SUB_COMMAND in
     "init")
@@ -722,14 +848,21 @@ main() {
     "add")
       add_worker
       ;;
-    "list")
+    "list"|"ls")
       list_clusters
       ;;
     "delworker")
       delete_worker
       ;;
+    "delcluster")
+      delete_cluster
+      ;;
     "usage"|"-h"|"--help")
       usage
+      ;;
+    "q"|"Q")
+      echo "👋 Exiting..."
+      exit 0
       ;;
     *)
       echo "⚠️ Invalid sub command check the usage."
