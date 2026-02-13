@@ -3,11 +3,15 @@
 > **AA Master's choice for rapid K8s infrastructure.**
 > 로컬 환경에서 Multipass를 기반으로 K3s 클러스터를 광속으로 구축하고 관리하기 위한 통합 CLI 도구입니다.
 
+## ⚠️ WARNING: For Development and Testing Only
+
+**This project is strictly intended for local development and testing environments.** 
+It is NOT designed or recommended for production use. The simplified security configurations and automated setups are optimized for developer productivity, not for high-availability or hardened production infrastructure.
+
 ## 🚀 Key Features
 
 - **통합 CLI:** 모든 기능을 `mpk3s` 명령어 하나로 제어합니다.
 - **자동 프로비저닝:** Master와 다수의 Worker 노드를 사양에 맞춰 자동 생성 및 구성합니다.
-- **Auditor 특화 모드:** `mpk3s auditor` 명령으로 검증된 최적 사양의 클러스터를 즉시 구축합니다.
 - **멀티 클러스터 관리:** 여러 클러스터의 `kubeconfig`를 독립적으로 관리하고 환경 변수를 자동 최적화합니다.
 - **보안 및 확장:** 외부 접속을 위한 TLS SAN 설정 및 동적 워커 노드 추가/삭제를 지원합니다.
 
