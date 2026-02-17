@@ -65,10 +65,9 @@ brew install mpk3s
 
 ```text
 k3s-helper/
-├── bin/          # mpk3s 메인 실행 파일
-├── libs/         # 핵심 기능을 담당하는 모듈화된 스크립트
-├── dev-logs/     # 일자별 개발 기록 및 결정 사항
-└── mpk3s.rb      # Homebrew 배포용 Formula
+├── bin/          # mpk3s 메인 실행 파일 (mpk3s main executable file)
+├── libs/         # 핵심 기능을 담당하는 모듈화된 스크립트 (Modularized scripts for core features)
+└── dev-logs/     # 일자별 개발 기록 및 결정 사항 (Daily development logs and decisions)
 ```
 
 ## 📄 License
