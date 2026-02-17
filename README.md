@@ -95,4 +95,5 @@ k3s-helper/
 This project is licensed under the **MIT License**.
 
 ---
+*Note: English translations in this document were generated with the assistance of Dino (AI Assistant).*
 *Developed with 🦖 by IK-YONG CHOI (AA Master)*
