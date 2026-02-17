@@ -1,0 +1,877 @@
+#!/bin/bash
+set -e
+# set -x
+
+## Global Definitions Start ##
+built_in_specs=(
+  "2cpus, 2G memory, 10G disk"
+  "4cpus, 4G memory, 20G disk"
+  "8cpus, 8G memory, 40G disk"
+  "Custom"
+)
+
+built_in_spec_map=(
+  "--cpus 2 --memory 2G --disk 10G"
+  "--cpus 4 --memory 4G --disk 20G"
+  "--cpus 8 --memory 8G --disk 40G"
+)
+
+sub_commands=(
+  "init"
+  "generate"
+  "tls"
+  "add"
+  "list"
+  "ls"
+  "delworker"
+  "delcluster"
+  "usage"
+)
+sub_command_messages=(
+  "Initialize kubeconfig"
+  "Generate a new cluster"
+  "Add TLS SAN config to master node"
+  "Add a worker to the cluster"
+  "List all clusters"
+  "Delete worker"
+  "Delete cluster"
+  "Usage"
+)
+
+CMD="multipass"
+
+usage() {
+  cat << 'EOF'
+mpk3s - Multipass K3s Cluster Management CLI
+Usage:
+  mpk3s [command]
+Commands:
+  init       Initialize kubeconfig script for multi-cluster management
+  generate   Create a new K3s cluster with master and worker nodes
+  add        Add worker nodes to an existing cluster
+  tls        Add TLS SAN configuration to master node
+  list, ls   List all Multipass K3s clusters
+  delworker  Delete worker nodes from an existing cluster(warning: Do not undo)
+  delcluster Delete cluster(warning: Do not undo)
+  help, -h   Show this help message
+Examples:
+  mpk3s                  # Interactive mode - show command menu
+  mpk3s generate         # Create new cluster interactively
+  mpk3s add              # Add workers to existing cluster
+  mpk3s init             # Create ~/.kube-config.sh script
+Cluster Specs (interactive selection):
+  - Small:   2 CPUs,  2G memory, 10G disk
+  - Medium:  4 CPUs,  4G memory, 20G disk
+  - Large:   8 CPUs,  8G memory, 40G disk
+  - Custom:  User-defined specifications
+K3s Options (prompted during generation):
+  - traefik        Ingress controller (default: enabled)
+  - flannel        CNI plugin (default: enabled)
+  - servicelb      LoadBalancer (default: enabled)
+  - local-storage  Storage class (default: enabled)
+  - metrics-server Metrics API (default: enabled)
+Prerequisites:
+  - Multipass installed (https://multipass.run)
+  - Network access for downloading K3s
+EOF
+  exit 0
+}
+
+cleanup() {
+  # echo "Delete temporary files"
+  rm -rf ./.master.yaml ./.worker-*.yaml ./.k3s-tls-san-*.yaml
+}
+
+# ------------------------------------------------------------------------------
+# Function: is_number
+# Description: 입력받은 문자열이 숫자인지 확인합니다.
+#              정수, 소수, 음수 모두 지원합니다.
+# Usage: is_number <string>
+# Returns: 0 (숫자), 1 (숫자가 아님)
+# ------------------------------------------------------------------------------
+is_number() {
+    if [ -z "$1" ]; then
+        echo "❌ Error: No input provided."
+        echo "Usage: is_number <string>"
+        return 1
+    fi
+
+    local input="$1"
+
+    if [[ "$input" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+## Global Definitions End ##
+
+
+
+init_kubeconfig(){
+  if [ -f "$HOME/.kube-config.sh" ]; then
+    echo "Kubeconfig exists"
+  else
+    cat << EOF > $HOME/.kube-config.sh
+#!/bin/sh
+
+KUBE_ROOT=\$HOME/.kube
+unset KUBECONFIG
+KUBECONFIG=''
+
+if [ -d \$KUBE_ROOT ]; then
+  for i in \$(ls -al \$KUBE_ROOT | grep config | grep -v "~" | awk '{print\$9}'); do
+    if [ -z \$KUBECONFIG ]; then
+      KUBECONFIG=\$KUBE_ROOT/\$i
+    else
+      KUBECONFIG=\$KUBECONFIG:\$KUBE_ROOT/\$i
+    fi
+  done
+fi
+export KUBECONFIG=\$KUBECONFIG
+EOF
+    chmod +x $HOME/.kube-config.sh
+    echo "Kubeconfig created"
+    echo "Add 'source $HOME/.kube-config.sh' to your .zshrc or .zprofile file"
+  fi
+}
+
+
+###### Create Cluster Start ######
+verify_multipass_cmd() {
+  if ! command -v multipass &> /dev/null; then
+    echo "multipass command not found. Please install multipass first."
+    exit 1
+  fi
+}
+
+trap cleanup EXIT ERR
+
+set_cluster_name() {
+  read -p "Enter cluster name(cluster name will be used as k8s cluster(context) name and multipass instance prefix): " CLUSTER_NAME
+
+  if [ -z $CLUSTER_NAME ]; then
+    echo "Error: Cluster name is required"
+    set_cluster_name
+  else
+    check_duplicate_cluster_name
+  fi
+}
+
+check_duplicate_cluster_name() {
+  if [ $(multipass ls | grep ^${CLUSTER_NAME}-master | wc -l) -ne 0 ]; then
+    echo "Error: Cluster name is aleady used. Please use another name."
+    set_cluster_name
+  fi
+}
+
+
+set_network_name() {
+  NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
+}
+
+# --- ADD: Multipass 이미지 선택 및 multipass 래퍼 ---
+
+select_multipass_image() {
+  echo "Searching for Ubuntu images..."
+  CMD="multipass"
+
+  IMAGES=()
+  while IFS= read -r line; do
+      # Only include lines where the description contains "Ubuntu"
+      if [[ "$line" == *"Ubuntu"* ]]; then
+          IMAGES+=("$line")
+      fi
+  done < <($CMD find)
+
+  # Check if we found any images
+  if [ ${#IMAGES[@]} -eq 0 ]; then
+      echo "❌ No Ubuntu images found."
+      exit 1
+  fi
+
+  echo ""
+  echo "📋 Available Ubuntu Images:"
+  echo "--------------------------------------------------------------------------------"
+  # Print header for reference
+  $CMD find | head -n 1
+  echo "--------------------------------------------------------------------------------"
+
+  # Set prompt for selection
+  PS3="
+👉 Select an image number (or 'q' to quit): "
+
+  # Provide selection menu
+  select choice in "${IMAGES[@]}"; do
+      if [[ "$REPLY" == "q" ]]; then
+          echo "👋 Exiting..."
+          exit 0
+      elif [ -n "$choice" ]; then
+          # Extract the first column (Image/Alias) as the selected image name
+          IMAGE_NAME=$(echo "$choice" | awk '{print $1}')
+          echo ""
+          echo "✅ Selection Confirmed!"
+          echo "------------------------------------------------"
+          echo "Selected Image: $IMAGE_NAME"
+          echo "Full Detail   : $choice"
+          echo "------------------------------------------------"
+          break
+      else
+          echo "⚠️  Invalid selection. Please enter a number from the list above."
+      fi
+  done
+  # echo "Choice image: ${IMAGE_NAME}"
+  # return 0
+}
+
+
+set_custom_master_spec() {
+  read -p "Enter cpu count: " CPU_COUNT
+  read -p "Enter memory size: " MEMORY_SIZE
+  read -p "Enter disk size: " DISK_SIZE
+
+  if ! echo "$CPU_COUNT" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid cpu count"
+    set_custom_master_spec
+  fi
+
+  if ! echo "$MEMORY_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid memory size"
+    set_custom_master_spec
+  fi
+
+  if ! echo "$DISK_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid disk size"
+    set_custom_master_spec
+  fi
+
+  MASTER_SPEC="--cpus ${CPU_COUNT} --memory ${MEMORY_SIZE}G --disk ${DISK_SIZE}G"
+  echo "MASTER_SPEC is ${MASTER_SPEC}"
+}
+
+set_master_spec () {
+  PS3="
+👉 Select master spec : "
+  select choice in "${built_in_specs[@]}"; do
+    if [ "$REPLY" == "4" ]; then
+      set_custom_master_spec
+      break
+    elif [ -n "$choice" ]; then
+      MASTER_SPEC=${built_in_spec_map[$REPLY-1]}
+      break
+    else
+      echo "⚠️ Invalid selection. Please enter a number from the list above."
+    fi
+  done
+}
+
+set_custom_worker_spec() {
+  read -p "Enter cpu count: " CPU_COUNT
+  read -p "Enter memory size: " MEMORY_SIZE
+  read -p "Enter disk size: " DISK_SIZE
+
+  if ! echo "$CPU_COUNT" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid cpu count"
+    set_custom_worker_spec
+  fi
+
+  if ! echo "$MEMORY_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid memory size"
+    set_custom_worker_spec
+  fi
+
+  if ! echo "$DISK_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid disk size"
+    set_custom_worker_spec
+  fi
+
+  WORKER_SPEC="--cpus ${CPU_COUNT} --memory ${MEMORY_SIZE}G --disk ${DISK_SIZE}G"
+  echo "WORKER_SPEC is ${WORKER_SPEC}"
+}
+
+set_install_k3s_exec() {
+  ## 예시 1: etcd + flannel (기본 vxlan)
+  ### curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init" sh -
+  ## 예시 2: etcd + flannel 제거 + Calico를 직접 설치할 준비
+  ### curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init --flannel-backend=none --disable-network-policy" sh -
+  ### curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--cluster-init --disable=traefik" sh -
+  # traefik 비활성화 (Istio 사용을 위해)
+
+  read -p "Use traefik? (Y/n): " use_traefik
+  read -p "Use flannel? (Y/n): " use_flannel
+  read -p "Use servicelb? (Y/n): " use_servicelb
+  read -p "Use local storage? (Y/n): " use_local
+  read -p "Use metrics-server? (Y/n): " use_metrics_server
+
+  if [ "$use_traefik" = "n" ]; then
+    INSTALL_K3S_EXEC="--cluster-init --disable=traefik"
+  else
+    INSTALL_K3S_EXEC="--cluster-init"
+  fi
+
+  if [ "$use_flannel" = "n" ]; then
+    INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --flannel-backend=none --disable-network-policy"
+  fi
+
+  if [ "$use_servicelb" = "n" ]; then
+    INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --disable=servicelb"
+  fi
+
+  if [ "$use_local" = "n" ]; then
+    INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --disable=local-storage"
+  fi
+
+  if [ "$use_metrics_server" = "n" ]; then
+    INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC} --disable=metrics-server"
+  fi
+
+  # echo "INSTALL_K3S_EXEC is ${INSTALL_K3S_EXEC}"
+}
+
+generate_master() {
+  cat > .master.yaml <<EOF
+package_update: true
+packages:
+  - curl
+runcmd:
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="${INSTALL_K3S_EXEC}" sh -
+  - mkdir -p /etc/k3s
+EOF
+
+  multipass launch ${IMAGE_NAME} --name ${CLUSTER_NAME}-master ${MASTER_SPEC} --network ${NETWORK_NAME} --cloud-init .master.yaml
+  rm -f ./.master.yaml
+  echo "Initializing k3s..."
+  MASTER_IP=$(multipass exec ${CLUSTER_NAME}-master -- hostname -I | awk '{print $1}')
+  NODE_TOKEN=$(multipass exec ${CLUSTER_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
+}
+
+generate_workers() {
+  for i in $(seq 1 $WORKER_SIZE); do
+    cat > .worker-${i}.yaml <<EOF
+package_update: true
+packages:
+  - curl
+runcmd:
+  - curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -
+EOF
+    echo "Launching ${i} worker node"
+    multipass launch ${IMAGE_NAME} --name ${CLUSTER_NAME}-worker${i} ${WORKER_SPEC} --network ${NETWORK_NAME} --cloud-init .worker-${i}.yaml
+    rm -f ./.worker-${i}.yaml
+  done
+
+  echo "All nodes created. Checking cluster state..."
+}
+
+create_k8s_config() {
+  multipass exec ${CLUSTER_NAME}-master -- sudo kubectl get nodes
+  echo "Generate k8s config file"
+  multipass exec ${CLUSTER_NAME}-master -- sudo cat /etc/rancher/k3s/k3s.yaml | sed -e "s/127.0.0.1/$MASTER_IP/g" -e "s/default/${CLUSTER_NAME}-context/g" > $HOME/.kube/config-${CLUSTER_NAME}
+  echo "Add following message you're KUBECONFIG env."
+  echo "\$HOME/.kube/config-${CLUSTER_NAME}"
+}
+
+confirm_info() {
+  echo "Context name: ${CLUSTER_NAME}"
+  echo "NETWORK_NAME name: ${NETWORK_NAME}"
+  echo "WORKER SIZE: ${WORKER_SIZE}"
+  echo "Multipass image: ${IMAGE_NAME}"
+
+  read -p "Generate cluster? (Y/n): " confirm_generate
+  if [[ "$confirm_generate" == "n" || "$confirm_generate" == "N" ]]; then
+    exit 0
+  fi
+}
+###### Create Cluster End ######
+
+###### Add Worker Start ######
+
+select_cluster() {
+    CLUSTERS=()
+
+    while IFS= read -r line; do
+        CLUSTERS+=("$line")
+    done < <($CMD ls | grep master | awk '{print $1}')
+
+    if [ ${#CLUSTERS[@]} -eq 0 ]; then
+        echo "No clusters found. Exiting..."
+        exit 1
+    fi
+
+    echo ""
+    echo "📋 Available Ubuntu Images:"
+    echo "--------------------------------------------------------------------------------"
+    # Print header for reference
+    $CMD ls | head -n 1
+    echo "--------------------------------------------------------------------------------"
+
+    PS3="
+👉 Select an cluster number (or 'q' to quit): "
+
+    select choice in "${CLUSTERS[@]}"; do
+      if [[ "$REPLY" == "q" || "$REPLY" == "Q" ]]; then
+        echo "👋 Exiting..."
+        exit 0
+      elif [ -n "$choice" ]; then
+        CLUSTER_NAME=$(sed -e "s/-master//g" <<< "${choice}")
+        break
+      else
+        echo "⚠️  Invalid selection. Please enter a number from the list above."
+      fi
+    done
+}
+
+set_worker_size() {
+  read -p "Enter worker size(default: 1): " WORKER_SIZE
+  if [ -z $WORKER_SIZE ]; then
+    WORKER_SIZE=1
+  fi
+}
+
+set_custom_spec() {
+  read -p "Enter cpu count: " CPU_COUNT
+  read -p "Enter memory size: " MEMORY_SIZE
+  read -p "Enter disk size: " DISK_SIZE
+
+  if ! echo "$CPU_COUNT" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid cpu count"
+    set_custom_spec
+  fi
+
+  if ! echo "$MEMORY_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid memory size"
+    set_custom_spec
+  fi
+
+  if ! echo "$DISK_SIZE" | grep -Eq '^[0-9]+$'; then
+    echo "Invalid disk size"
+    set_custom_spec
+  fi
+
+  WORKER_SPEC="--cpus ${CPU_COUNT} --memory ${MEMORY_SIZE}G --disk ${DISK_SIZE}G"
+  echo "WORKER_SPEC is ${WORKER_SPEC}"
+}
+
+set_worker_spec () {
+  PS3="
+👉 Select worker spec : "
+  select choice in "${built_in_specs[@]}"; do
+    if [ "$REPLY" == "4" ]; then
+      set_custom_worker_spec
+      break
+    elif [ -n "$choice" ]; then
+      WORKER_SPEC=${built_in_spec_map[$REPLY-1]}
+      break
+    else
+      echo "⚠️ Invalid selection. Please enter a number from the list above."
+    fi
+  done
+}
+
+
+confirm_add_worker() {
+  read -p "Are you sure you want to add $WORKER_SIZE worker(s) to ${CLUSTER_NAME}-cluster? (Y/n): " confirm
+  if [ "$confirm" == "n" ] && [ "$confirm" == "N" ]; then
+    echo "Exiting..."
+    exit 0
+  fi
+}
+
+
+set_master_name() {
+    MASTER_NAME=${CLUSTER_NAME}-master
+    if [ -z $MASTER_NAME ]; then
+        echo "Not found master name[$1]"
+        exit 1
+    fi
+}
+
+set_vm_image() {
+    IMAGE_NAME=$(multipass ls | grep ^${CLUSTER_NAME}-master | awk '{print $5}')
+    if [ -z $IMAGE_NAME ]; then
+        echo "Not found vm image[$1]"
+        exit 1
+    fi
+}
+
+set_worker_start_number() {
+  LAST_WORKER_NUMBER=1
+  for i in $(multipass ls | grep ^${CLUSTER_NAME}-worker | wc -l | awk '{print $1}'); do
+    LAST_WORKER_NUMBER=$(sed -e "s/${CLUSTER_NAME}-worker//g" <<< "${i}")
+  done
+}
+
+set_network_name() {
+    NETWORK_NAME=$(multipass networks | grep en0 | awk '{print $1}')
+}
+
+set_master_ip() {
+    MASTER_IP=$(multipass exec ${CLUSTER_NAME}-master -- hostname -I | awk '{print $1}')
+}
+
+set_node_token() {
+    NODE_TOKEN=$(multipass exec ${CLUSTER_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
+}
+
+set_start_end_number() {
+    START_NUMBER=$(( $LAST_WORKER_NUMBER + 1 ))
+    END_NUMBER=$(( $LAST_WORKER_NUMBER + $WORKER_SIZE))
+    # echo "START_NUMBER is ${START_NUMBER}"
+    # echo "END_NUMBER is ${END_NUMBER}"
+}
+
+create_workers() {
+  for i in $(seq $START_NUMBER $END_NUMBER); do
+    cat > .worker-${i}.yaml <<EOF
+package_update: true
+image: ${IMAGE_NAME}
+packages:
+  - curl
+runcmd:
+  - curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -
+EOF
+
+    multipass launch ${IMAGE_NAME} --name ${CLUSTER_NAME}-worker${i} ${WORKER_SPEC} --network ${NETWORK_NAME} --cloud-init .worker-${i}.yaml
+    rm -f ./.worker-${i}.yaml
+  done
+}
+
+print_cluster_state() {
+  echo ""
+  echo "📋 Cluster State:"
+  echo "--------------------------------------------------------------------------------"
+  multipass exec ${CLUSTER_NAME}-master -- sudo kubectl get nodes
+  echo "--------------------------------------------------------------------------------"
+}
+###### Add Worker End ######
+
+###### Add TLS SAN Satrt #####
+# set cluster_name, domain, temp_file_name, isApply
+
+readClusterName() {
+  read -p "cluster name : " cluster_name
+  temp_file_name="${cluster_name}_config.txt"
+}
+
+readDomainName(){
+  read -p "domain name[not mandatory] : " domain
+}
+
+confirmTypeInfo(){
+  echo "Cluster Name is ${cluster_name}"
+  if [[ ! -z $domain ]]; then
+    echo "Domain is ${domain}"
+  fi
+
+  read -p "Apply config?[Y/n]" isApply
+}
+
+writeTempTlsSanConfig(){
+  echo "tls-san:" > $temp_file_name
+  if [[ ! -z $domain ]]; then
+    echo "  - $domain" >> $temp_file_name
+  fi
+
+  for i in $(multipass exec ${cluster_name}-master -- ip a | grep -v grep | grep enp | grep inet | awk '{print$2}' | awk -F/ '{print$1}'); do
+    config="${config}  - ${i}\r\n"
+    cat<<EOF >> $temp_file_name
+  - ${i}
+EOF
+  done
+}
+
+applyTlsSanConfig(){
+  cat $temp_file_name | multipass exec ${cluster_name}-master -- sudo tee /etc/rancher/k3s/config.yaml
+  rm -rf $temp_file_name
+  echo "restarting k3s service..."
+  multipass exec ${cluster_name}-master -- sudo systemctl restart k3s
+  echo "finished job"
+}
+###### Add TLS SAN End #####
+###### Delete Worker Start #####
+
+cluster_list=()
+selected_cluster=""
+print_and_select_cluster() {
+  cluster_list=$(multipass ls | grep master | awk '{print$1}')
+  echo "--------------------------------"
+  echo "Available Clusters"
+  echo "--------------------------------"
+  PS3="
+👉 Select cluster to delete worker: "
+  select choice in "${cluster_list[@]}"; do
+    if [ -n "$choice" ]; then
+      selected_cluster=$(sed -e "s/-master//g" <<< $choice)
+      break
+    else
+      echo "⚠️  Invalid selection. Please enter a number from the list above."
+    fi
+  done
+}
+
+selected_worker_list=()
+selected_worker=""
+select_delete_worker_list() {
+
+  echo "--------------------------------------------------------------------------------------------"
+  echo -e "No\t$($CMD ls | head -n 1)"
+  echo "--------------------------------------------------------------------------------------------"
+  idx=1
+  while IFS= read -r line; do
+    echo -e "${idx}\t${line}"
+    available_worker_list+=($idx)
+    selected_worker_list+=($(awk '{print$1}' <<< $line))
+    idx=$((idx+1))
+  done < <(multipass ls | grep "${selected_cluster}-worker")
+  if [ -z "$selected_worker_list" ]; then
+    echo "No worker(s) found for cluster ${selected_cluster}"
+    echo "--------------------------------------------------------------------------------------------"
+    exit 1
+  else
+    echo "--------------------------------------------------------------------------------------------"
+    read -p "Type number seperated by space to be deleted workers : " selected_worker
+  fi
+}
+
+will_delete_worker_list=()
+validate_selected_worker() {
+  if [[ -z $selected_worker ]]; then
+    echo "Error: No worker selected"
+    exit 1
+  else
+    for i in ${selected_worker}; do
+      if [[ "${available_worker_list[@]}" != *"${i}"* ]]; then
+        echo "Error: ${selected_cluster}-worker${i} not found"
+        exit 1
+      elif [[ -n $i ]]; then
+        will_delete_worker_list+=(${selected_worker_list[$i-1]})
+      else
+        echo "Error: Invalid selection. Please enter a number from the list above."
+        exit 1
+      fi
+    done
+  fi
+}
+
+confirm_delete_worker() {
+  for i in ${will_delete_worker_list[@]}; do
+    read -p "You will now delete '${i}' file. This action can't be undone. [y/N]: " isApply
+    if [[ "y" == $isApply ]]; then
+      multipass delete ${i}
+      multipass purge
+      echo "${i} deleted"
+    fi
+  done
+}
+###### Delete Worker End #####
+
+###### Delete Cluster Start #####
+
+current_clusters=()
+
+print_and_select_cluster_to_delete() {
+  echo "--------------------------------------------------------------------------------------------"
+  echo -e "No\t$($CMD ls | head -n 1)"
+  echo "--------------------------------------------------------------------------------------------"
+  idx=1
+  while IFS= read -r line; do
+    echo -e "${idx}\t${line}"
+    idx=$((idx+1))
+    current_clusters+=($(awk '{print $1}' <<< $line))
+  done < <($CMD ls | grep -E "^[a-zA-Z0-9_-]+-master\s")
+
+  if [ $idx -gt 1 ]; then
+    echo "--------------------------------------------------------------------------------------------"
+    read -p "Type number to delete cluster : " selected_cluster
+
+    if ! is_number $selected_cluster; then
+      echo "Error: Invalid selection. Please enter a number from the list above."
+      exit 1
+    fi
+
+    if [[ $selected_cluster -gt $idx || $selected_cluster -lt 1 ]]; then
+      echo "Error: Invalid selection. Please enter a number from the list above."
+      exit 1
+    fi
+
+    selected_cluster=$(sed -e "s/-master//g" <<< ${current_clusters[$selected_cluster - 1]})
+  else
+    echo "No cluster found"
+    echo "--------------------------------------------------------------------------------------------"
+    exit 1
+  fi
+}
+
+
+confirm_delete_cluster() {
+  read -p "You will now delete '${selected_cluster}' cluster. This action can't be undone. [y/N]: " isApply
+  if [[ "y" == $isApply ]]; then
+
+    ## Delete Workers
+    while IFS= read -r line; do
+      temp_worker="$(awk '{print $1}' <<< $line)"
+      echo "${temp_worker} deleted"
+      $CMD stop $temp_worker
+      $CMD delete $temp_worker
+    done < <($CMD ls | grep ${selected_cluster}-worker)
+
+    ## Delete Master
+    $CMD stop ${selected_cluster}-master
+    $CMD delete ${selected_cluster}-master
+    $CMD purge
+
+    echo "${selected_cluster} deleted"
+    trap delete_k8s_cluster EXIT ERR
+  else
+    echo "No cluster deleted"
+    exit 0
+  fi
+}
+
+delete_k8s_cluster() {
+  # echo "$HOME/.kube/config-${selected_cluster} deleted"
+  rm -f $HOME/.kube/config-${selected_cluster}
+}
+
+###### Delete Cluster End #####
+
+###### List Up Clusters Start #####
+list_up_clusters() {
+  echo "--------------------------------------------------------------------------------------------"
+  $CMD ls | head -n 1
+  echo "--------------------------------------------------------------------------------------------"
+  $CMD ls | grep -v grep | grep master
+}
+###### List Up Clusters End #####
+
+generate_cluster() {
+  verify_multipass_cmd
+  set_cluster_name
+  set_master_spec
+  set_worker_size
+  set_worker_spec
+  set_network_name
+  select_multipass_image
+  set_install_k3s_exec
+  confirm_info
+  generate_master
+  generate_workers
+  create_k8s_config
+}
+
+add_worker() {
+  select_cluster
+  set_worker_size
+  set_worker_spec
+  confirm_add_worker
+  set_master_name
+  set_worker_start_number
+  set_vm_image
+  set_network_name
+  set_master_ip
+  set_node_token
+  set_start_end_number
+  create_workers
+  print_cluster_state
+}
+
+add_tls_san_config() {
+  readClusterName
+  readDomainName
+  confirmTypeInfo
+  if [[ -z $isApply || "Y" == $isApply ]]; then
+    writeTempTlsSanConfig
+    applyTlsSanConfig
+  fi
+}
+
+delete_worker() {
+  print_and_select_cluster
+  select_delete_worker_list
+  validate_selected_worker
+  confirm_delete_worker
+}
+
+delete_cluster() {
+  print_and_select_cluster_to_delete
+  confirm_delete_cluster
+}
+
+list_clusters() {
+  list_up_clusters
+}
+
+SUB_COMMAND=$1
+
+main() {
+
+  if [ -z $SUB_COMMAND ]; then
+    PS3="
+👉 Select a sub command (or 'q' to quit): "
+
+    select choice in "${sub_commands[@]}"; do
+      if [[ "$REPLY" == "q" || "$REPLY" == "Q" ]]; then
+        echo "👋 Exiting..."
+        exit 0
+      elif [ -n "$choice" ]; then
+        SUB_COMMAND=${sub_commands[$REPLY-1]}
+        break
+      else
+        echo "⚠️ Invalid selection. Please enter a number from the list above."
+        exit 1
+      fi
+    done
+    # echo "Select a sub command (or 'q' to quit):"
+    # idx=1
+    # for i in ${sub_commands[@]}; do
+    #   echo "${idx}) ${i}"
+    #   idx=$((idx+1))
+    # done
+    # read -p "Type number to select sub command : " selected_sub_command
+
+    # if [[ "q" == $selected_sub_command || "Q" == $selected_sub_command ]]; then
+    #   SUB_COMMAND="q"
+    # else
+    #   $SUB_COMMAND=${sub_commands[$selected_sub_command - 1]}
+    # fi
+  fi
+
+  case $SUB_COMMAND in
+    "init")
+      init_kubeconfig
+      ;;
+    "generate")
+      generate_cluster
+      ;;
+    "tls")
+      add_tls_san_config
+      ;;
+    "add")
+      add_worker
+      ;;
+    "list"|"ls")
+      list_clusters
+      ;;
+    "delworker")
+      delete_worker
+      ;;
+    "delcluster")
+      delete_cluster
+      ;;
+    "usage"|"-h"|"--help")
+      usage
+      ;;
+    "q"|"Q")
+      echo "👋 Exiting..."
+      exit 0
+      ;;
+    *)
+      echo "⚠️ Invalid sub command check the usage."
+      usage
+      ;;
+  esac
+}
+
+
+
+###### Main Start ######
+main

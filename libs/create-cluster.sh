@@ -31,7 +31,7 @@ fi
 
 echo "INSTALL_K3S_EXEC is ${INSTALL_K3S_EXEC}"
 
-cat > master.yaml <<EOF
+cat > .master.yaml <<EOF
 package_update: true
 image: ${IMAGE}
 packages:
@@ -42,9 +42,9 @@ runcmd:
 EOF
 
 
-multipass launch --name ${CONTEXT_NAME}-master --cpus 2 --memory 2G --disk 10G --network ${NETWORK_NAME} --cloud-init master.yaml
+multipass launch --name ${CONTEXT_NAME}-master --cpus 2 --memory 2G --disk 10G --network ${NETWORK_NAME} --cloud-init .master.yaml
 
-rm -f ./master.yaml
+rm -f ./.master.yaml
 
 echo "Initializing k3s..."
 
@@ -52,7 +52,7 @@ MASTER_IP=$(multipass exec ${CONTEXT_NAME}-master -- hostname -I | awk '{print $
 NODE_TOKEN=$(multipass exec ${CONTEXT_NAME}-master -- sudo cat /var/lib/rancher/k3s/server/node-token)
 
 for i in $(seq 1 $WORKER_SIZE); do
-  cat > worker-${i}.yaml <<EOF
+  cat > .worker-${i}.yaml <<EOF
 package_update: true
 image: ${IMAGE}
 packages:
@@ -61,8 +61,8 @@ runcmd:
   - curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -
 EOF
   echo "Launching ${i} worker node"
-  multipass launch --name ${CONTEXT_NAME}-worker${i} --cpus 2 --memory 2G --disk 10G --network ${NETWORK_NAME} --cloud-init worker-${i}.yaml
-  rm -f ./worker-${i}.yaml
+  multipass launch --name ${CONTEXT_NAME}-worker${i} --cpus 2 --memory 2G --disk 10G --network ${NETWORK_NAME} --cloud-init .worker-${i}.yaml
+  rm -f ./.worker-${i}.yaml
 done
 
 
