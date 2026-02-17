@@ -17,7 +17,7 @@ It is NOT designed or recommended for production use. The simplified security co
 
 ## 🛠 Prerequisites
 
-- **macOS / Linux**
+- **macOS**
 - **Multipass** installed ([https://multipass.run](https://multipass.run))
 - **curl** (for K3s installation)
 
