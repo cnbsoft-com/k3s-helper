@@ -10,6 +10,16 @@
 >
 > K3s에 대한 더 자세한 정보는 [공식 웹사이트](https://k3s.io)를 참조하십시오. (For more detailed information about K3s, please refer to the official website: [https://k3s.io](https://k3s.io))
 
+## 🌟 Motivation (만든 계기)
+
+애플 실리콘(M1/M2/M3/M4) 맥 환경에서 쿠버네티스를 공부하기 위해 로컬 환경을 구성하는 일은 매우 험난했습니다. (Setting up a local Kubernetes environment on Apple Silicon Macs for learning was a challenging journey.) 겨우 성공하더라도 재구성할 때마다 다시 실패하는 일이 잦았습니다. (Even after succeeding, I often faced failures whenever I tried to rebuild the cluster.)
+
+그러던 중 K3s와 Multipass를 알게 되었고, 이 훌륭한 도구들 덕분에 구성 자체의 어려움을 해결할 수 있었습니다. 이 자리를 빌려 **K3s와 Multipass 팀, 그리고 개발자 커뮤니티에 깊은 감사**를 표합니다. (Then, I discovered K3s and Multipass, and thanks to these excellent tools, I was able to overcome the initial difficulties. I would like to take this opportunity to express my deep gratitude to the K3s and Multipass teams and the developer community.)
+
+저는 이 프로젝트들을 통해 얻은 도움을 커뮤니티에 다시 보답하고자 합니다. (I wish to give back to the community that has helped me so much through these projects.) 빈번한 테스트를 위해 반복되는 번거로운 인프라 구축 과정을 자동화하여, 다른 개발자분들도 오직 설계와 학습에만 집중할 수 있도록 돕기 위해 **`mpk3s`**를 공개하게 되었습니다. (By automating the repetitive and tedious infrastructure setup for frequent testing, I released `mpk3s` to help other developers focus solely on architecture and learning.)
+
+아직 초기 버전이라 미흡한 점이 많지만, 앞으로 틈틈이 유용한 기능들을 계속해서 추가해 나갈 예정입니다. (While still in its early stages and potentially lacking in some areas, I plan to continue adding useful features whenever possible.)
+
 ## ⚠️ WARNING: For Development and Testing Only
 
 **This project is strictly intended for local development and testing environments.** 
