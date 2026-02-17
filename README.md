@@ -7,6 +7,8 @@
 
 > **AA Master's choice for rapid K8s infrastructure.**
 > 로컬 환경에서 Multipass를 기반으로 K3s 클러스터를 광속으로 구축하고 관리하기 위한 통합 CLI 도구입니다. (An integrated CLI tool for rapidly building and managing K3s clusters on a local environment based on Multipass.)
+>
+> K3s에 대한 더 자세한 정보는 [공식 웹사이트](https://k3s.io)를 참조하십시오. (For more detailed information about K3s, please refer to the official website: [https://k3s.io](https://k3s.io))
 
 ## ⚠️ WARNING: For Development and Testing Only
 
