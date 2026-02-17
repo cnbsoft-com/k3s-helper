@@ -1,4 +1,4 @@
-# mpk3s - Multipass K3s Cluster Manager 🦖
+# mpk3s - Multipass K3s Cluster Manager
 
 > **AA Master's choice for rapid K8s infrastructure.**
 > 로컬 환경에서 Multipass를 기반으로 K3s 클러스터를 광속으로 구축하고 관리하기 위한 통합 CLI 도구입니다.
@@ -21,7 +21,7 @@ It is NOT designed or recommended for production use. The simplified security co
 - **Multipass** installed ([https://multipass.run](https://multipass.run))
 - **curl** (for K3s installation)
 
-## 💻 Usage
+## Usage
 
 ### 1. 초기화 (Initialize)
 멀티 클러스터 관리를 위한 kubeconfig 설정 스크립트를 생성합니다.
@@ -36,20 +36,14 @@ mpk3s init
 mpk3s generate
 ```
 
-### 3. AA Auditor 전용 클러스터 생성 (Auditor)
-마스터의 최적 권장 사양(Master 1, Worker 2)으로 즉시 구축합니다.
-```bash
-mpk3s auditor
-```
-
-### 4. 클러스터 관리
+### 3. 클러스터 관리
 ```bash
 mpk3s list        # 모든 클러스터 목록 확인 (ls 가능)
 mpk3s add         # 기존 클러스터에 워커 노드 추가
 mpk3s tls         # 마스터 노드에 TLS SAN 설정 추가
 ```
 
-### 5. 노드 및 클러스터 삭제
+### 4. 노드 및 클러스터 삭제
 ```bash
 mpk3s delworker   # 특정 워커 노드 삭제
 mpk3s delcluster  # 클러스터 전체 및 관련 설정 파일 완벽 삭제
@@ -76,4 +70,4 @@ k3s-helper/
 This project is licensed under the **MIT License**.
 
 ---
-*Developed with ❤️ by IK-YONG CHOI (AA Master)*
+*Developed with 🦖 by IK-YONG CHOI (AA Master)*
