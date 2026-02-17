@@ -1,4 +1,9 @@
-# mpk3s - Multipass K3s Cluster Manager
+# mpk3s - Multipass K3s Cluster Manager 🦖
+
+[![License](https://img.shields.io/github/license/cnbsoft-com/k3s-helper)](https://github.com/cnbsoft-com/k3s-helper/blob/main/LICENSE)
+[![Version](https://img.shields.io/github/v/release/cnbsoft-com/k3s-helper)](https://github.com/cnbsoft-com/k3s-helper/releases)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![Language](https://img.shields.io/badge/language-shell-brightgreen)
 
 > **AA Master's choice for rapid K8s infrastructure.**
 > 로컬 환경에서 Multipass를 기반으로 K3s 클러스터를 광속으로 구축하고 관리하기 위한 통합 CLI 도구입니다.
