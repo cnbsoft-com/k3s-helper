@@ -14,7 +14,7 @@
 
 애플 실리콘(M1/M2/M3/M4) 맥 환경에서 쿠버네티스를 공부하기 위해 로컬 환경을 구성하는 일은 매우 험난했습니다. (Setting up a local Kubernetes environment on Apple Silicon Macs for learning was a challenging journey.) 겨우 성공하더라도 재구성할 때마다 다시 실패하는 일이 잦았습니다. (Even after succeeding, I often faced failures whenever I tried to rebuild the cluster.)
 
-그러던 중 K3s와 Multipass를 알게 되었고, 이 훌륭한 도구들 덕분에 구성 자체의 어려움을 해결할 수 있었습니다. 이 자리를 빌려 **K3s와 Multipass 팀, 그리고 개발자 커뮤니티에 깊은 감사**를 표합니다. (Then, I discovered K3s and Multipass, and thanks to these excellent tools, I was able to overcome the initial difficulties. I would like to take this opportunity to express my deep gratitude to the K3s and Multipass teams and the developer community.)
+그러던 중 [K3s](https://k3s.io)와 [Multipass](https://multipass.run)를 알게 되었고, 이 훌륭한 도구들 덕분에 구성 자체의 어려움을 해결할 수 있었습니다. 이 자리를 빌려 **K3s와 Multipass 팀, 그리고 개발자 커뮤니티에 깊은 감사**를 표합니다. (Then, I discovered K3s and Multipass, and thanks to these excellent tools, I was able to overcome the initial difficulties. I would like to take this opportunity to express my deep gratitude to the K3s and Multipass teams and the developer community.)
 
 저는 이 프로젝트들을 통해 얻은 도움을 커뮤니티에 다시 보답하고자 합니다. (I wish to give back to the community that has helped me so much through these projects.) 빈번한 테스트를 위해 반복되는 번거로운 인프라 구축 과정을 자동화하여, 다른 개발자분들도 오직 설계와 학습에만 집중할 수 있도록 돕기 위해 **`mpk3s`**를 공개하게 되었습니다. (By automating the repetitive and tedious infrastructure setup for frequent testing, I released `mpk3s` to help other developers focus solely on architecture and learning.)
 
@@ -81,6 +81,15 @@ k3s-helper/
 ├── libs/         # 핵심 기능을 담당하는 모듈화된 스크립트 (Modularized scripts for core features)
 └── dev-logs/     # 일자별 개발 기록 및 결정 사항 (Daily development logs and decisions)
 ```
+
+## 🗺️ Roadmap (향후 계획)
+
+앞으로 다음과 같은 기능들을 추가하여 도구의 완성도를 높여갈 예정입니다. (I plan to enhance the tool's completeness by adding the following features in the future.)
+
+1. **Multipass 사양 변경 기능: (Multipass Spec Customization:)** 
+   - CPU 코어 수, 메모리 용량, 디스크 사이즈를 자유롭게 지정하는 기능 (Ability to customize CPU cores, memory capacity, and disk size.)
+2. **마운트 기능: (Mount Support:)** 
+   - 호스트와 VM 간의 디렉토리 공유를 위한 마운트 기능 추가 (Add mount support for directory sharing between the host and VMs.)
 
 ## 📄 License
 This project is licensed under the **MIT License**.
