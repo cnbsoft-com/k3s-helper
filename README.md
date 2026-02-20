@@ -16,6 +16,7 @@
 - [🚀 Key Features](#-key-features)
 - [🛠 Prerequisites](#-prerequisites)
 - [🍺 Installation via Homebrew](#-installation-via-homebrew-upcoming)
+- [🚀 Direct Installation (One-liner)](#-direct-installation-one-liner)
 - [💻 Usage](#usage)
 - [📂 Project Structure](#-project-structure)
 - [🗺️ Roadmap (향후 계획)](#️-roadmap-향후-계획)
@@ -54,6 +55,14 @@ It is NOT designed or recommended for production use. The simplified security co
 ```bash
 brew tap cnbsoft-com/tap
 brew install mpk3s
+```
+
+## 🚀 Direct Installation (One-liner)
+
+`brew tap` 없이 한 줄의 명령어로 즉시 설치할 수 있습니다. (Install immediately with a single command without `brew tap`.)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cnbsoft-com/k3s-helper/main/install.sh | sh
 ```
 
 ## Usage
