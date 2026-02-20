@@ -10,6 +10,17 @@
 >
 > K3s에 대한 더 자세한 정보는 [공식 웹사이트](https://k3s.io)를 참조하십시오. (For more detailed information about K3s, please refer to the official website: [https://k3s.io](https://k3s.io))
 
+## 📖 Table of Contents (목차)
+- [🌟 Motivation (만든 계기)](#-motivation-만든-계기)
+- [⚠️ WARNING](#️-warning-for-development-and-testing-only)
+- [🚀 Key Features](#-key-features)
+- [🛠 Prerequisites](#-prerequisites)
+- [🍺 Installation via Homebrew](#-installation-via-homebrew-upcoming)
+- [💻 Usage](#usage)
+- [📂 Project Structure](#-project-structure)
+- [🗺️ Roadmap (향후 계획)](#️-roadmap-향후-계획)
+- [📄 License](#-license)
+
 ## 🌟 Motivation (만든 계기)
 
 애플 실리콘(M1/M2/M3/M4) 맥 환경에서 쿠버네티스를 공부하기 위해 로컬 환경을 구성하는 일은 매우 험난했습니다. (Setting up a local Kubernetes environment on Apple Silicon Macs for learning was a challenging journey.) 겨우 성공하더라도 재구성할 때마다 다시 실패하는 일이 잦았습니다. (Even after succeeding, I often faced failures whenever I tried to rebuild the cluster.)
@@ -38,6 +49,13 @@ It is NOT designed or recommended for production use. The simplified security co
 - **Multipass** installed ([https://multipass.run](https://multipass.run))
 - **curl** (for K3s installation)
 
+## 🍺 Installation via Homebrew (Upcoming)
+
+```bash
+brew tap cnbsoft-com/tap
+brew install mpk3s
+```
+
 ## Usage
 
 ### 1. 초기화 (Initialize)
@@ -64,13 +82,6 @@ mpk3s tls         # 마스터 노드에 TLS SAN 설정 추가 (Add TLS SAN confi
 ```bash
 mpk3s delworker   # 특정 워커 노드 삭제 (Delete a specific worker node)
 mpk3s delcluster  # 클러스터 전체 및 관련 설정 파일 완벽 삭제 (Complete deletion of the entire cluster and related configuration files)
-```
-
-## 🍺 Installation via Homebrew (Upcoming)
-
-```bash
-brew tap cnbsoft-com/tap
-brew install mpk3s
 ```
 
 ## 📂 Project Structure
